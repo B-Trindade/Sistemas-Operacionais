@@ -1,0 +1,38 @@
+* A simulação tem que dar pra visualizar o que realmente estaria acontecendo
+num ambiente real
+
+* No caso do SO voce não enxerga nada, a não ser quando voce coloca um comando
+e ele responde. Então precisamos dizer o que ta acontecendo de fato
+
+* Quando voce for fazer o gerenciamento de processos, quando há a chegada de um
+processo, voce tem que informar "o processo tal chegou"
+  - Se na simulação tiver uma operação de I/O, "fulaninho pediu operação de I/O
+    tal, de prioridade tal"
+  - Quando chegar na finalização do I/O, "fulaninho terminou operação de I/O"
+
+* Dica: pegar um exemplo da lista e reproduzir no nosso programa, pra saber se
+ta certo
+
+* A simulação não tem que executar nada, nem carregar nada na memória
+  - Ele avisa, "deveria carregar na memória tantos bytes"
+  - "Agora estou retirando o fulano, passando pra área de swap"
+
+* Fornecer uma tabela com as condições prévias (duração, I/O, etc)
+  - Sejam "criativos"
+  - A gente fica responsável por determinar como vai ser essa tabela, e por como
+vai dar retorno pro usuário
+
+* Avisar previamente o que o processador vai fazer
+  - "Isso vai executar em tal ponto, I/O em tal momento, qual tipo de I/O"
+  - Exibir para o usuário o que ele vai avaliar, quantidade de processos e o que
+    cada um vai fazer, onde vai parar, etc
+
+* C sem biblioteca adicional
+  - Nada que facilite a implementação, que faça manipulação de estrutura de
+    dados
+
+* Fazer a demonstração (vídeo) de forma rápida e sucinta
+  - Colocar o que é realmente importante para mostrar o que a gente fez
+
+* O relatório tem mais detalhes: coisas que a gente implementou, discutiu
+  - Colocar discussões de decisões no relatório
