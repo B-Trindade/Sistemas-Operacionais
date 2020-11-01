@@ -4,8 +4,57 @@
 
 #define MAX_PROCESSES 10
 
+enum IOTypes {
+  IO_DISCO = 0,
+  IO_FITA,
+  IO_IMPRESSORA
+};
+
+enum Priorities {
+  PRIORITY_HIGH = 0,
+  PRIORITY_LOW,
+  PRIORITY_IO
+};
+
+enum Status {
+  STATUS_NEW = 0,   // Foi criado, ainda não está na fila
+  STATUS_READY,     // Esperando ser executado
+  STATUS_RUNNING,   // Está sendo executado
+  STATUS_WAITING,   // Entrou em IO / realizando IO
+  STATUS_TERMINATED // Processo acabou
+};
+
+int getIODuration(int io) {
+  // TODO: modificar os tempos
+  switch(io) {
+    case DISCO:
+      return 100;
+    case FITA:
+      return 101;
+    case IMPRESSORA:
+      return 102;
+    default:
+      return 0;
+  }
+}
+
+typedef struct IO_Operation {
+  int type;             // Identificador do IO
+  int start_time;       // Momento de início do IO
+} IO_Operation;
+
+typedef struct Process {
+  int PID;             // Identificador do processo
+  int PPID;            // Identificador do processo pai (sempre = 1)
+  int status;          // Status do processo
+  int total_time;      // Tempo total a ser executado
+  int elapsed_time;    // Tempo já executado
+  int priority;        // Nível de prioridade do processo
+  IO_Operation* IOs;   // Array de momentos de I/O
+} Process;
+
 // Inicializa o array de PIDs com 0s
-int PIDs[MAX_PROCESSES] = {};
+Process PIDs[MAX_PROCESSES] = {};
 
 // Gera PID novo, distinto de qualquer um presente no array de PIDs
 int generatePID() {
@@ -24,7 +73,7 @@ int generatePID() {
     for(int i = 0; i < MAX_PROCESSES; ++i) {
       // Se o PID já está presente na lista, precisamos gerar outro
       // Sai do `for` e garante outro loop do `while` externo
-      if(PIDs[i] == pid) {
+      if(PIDs[i].PID == pid) {
         is_new_pid = false;
         break;
       }
@@ -48,23 +97,38 @@ void sleep_ms(int milliseconds) {
   nanosleep(&ts, NULL);
 }
 
+IO_Operation createIO(int type, int start_time) {
+  IO_Operation ret;
+  ret.type = type;
+  ret.start_time = start_time;
+  return ret;
+}
+
+Process createProcess(int total_time, IO_Operation* ios) {
+  Process p;
+  p.PID = generatePID();
+  p.total_time = total_time;
+  p.elapsed_time = 0;
+  p.IOs = ios;
+  return p;
+}
+
 
 int main() {
   // Determina seed para a função de random
   srand(time(NULL));
 
-  std::cout << "Programa de exemplo:" << std::endl;
-  std::cout << "\tGerando PIDs distintos e adicionado ao array" << std::endl;
-  std::cout << "\tcom delay de 200ms entre cada adição" << std::endl;
-  for(int i = 0; i < MAX_PROCESSES; ++i) {
-    sleep_ms(200);
-    PIDs[i] = generatePID();
+  IO_Operation test_ios[3] = {
+    createIO(FITA,2),
+    createIO(DISCO,1),
+    createIO(IMPRESSORA,6)
+  };
+  Process p = createProcess(10, test_ios);
 
-    std::cout << "\t[ ";
-    for(int j = 0; j < MAX_PROCESSES; ++j) {
-      std::cout << PIDs[j] << " ";
-    }
-    std::cout << ']' << std::endl;
-  }
+  std::cout << "Processo de PID " << p.PID << std::endl;
+  std::cout << "\tTotal time: " << p.total_time << " u.t." << std::endl;
+  std::cout << "\tElapsed time: " << p.elapsed_time << " u.t." << std::endl;
+
+  // sleep_ms(200);
   return 0;
 }
