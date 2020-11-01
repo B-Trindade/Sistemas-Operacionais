@@ -1,4 +1,4 @@
-FLAGS=-std=c++17 -Wall -Wextra -Wpedantic -Werror
+FLAGS=-std=c++17 -Wall -Wextra
 
 all: main.cpp
 	g++ main.cpp -o main $(FLAGS)

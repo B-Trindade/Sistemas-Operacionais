@@ -1,8 +1,18 @@
 #include <ctime>
 #include <time.h>
+#include <stdlib.h>
 #include <iostream>
 
 #define MAX_PROCESSES 10
+
+// Função de sleep (em ms)
+// [Ref] stackoverflow.com/a/28827188/4824627
+void sleep_ms(int milliseconds) {
+  struct timespec ts;
+  ts.tv_sec = milliseconds / 1000;
+  ts.tv_nsec = (milliseconds % 1000) * 1000000;
+  nanosleep(&ts, NULL);
+}
 
 enum IOTypes {
   IO_DISCO = 0,
@@ -43,72 +53,63 @@ typedef struct IO_Operation {
   int start_time;       // Momento de início do IO
 } IO_Operation;
 
+int process_count = 0;
 
-// Inicializa o array de PIDs com 0s
-int PIDs[MAX_PROCESSES] = {};
-
-class Process
-{
+class Process {
 public:
-	int PID;				// Identificador do processo
-	int PPID;				// Identificador do processo pai (sempre = 1)
-	int status;				// Status do processo
-	int total_time;			// Tempo total a ser executado
-	int elapsed_time;		// Tempo já executado
-	int priority;			// Nível de prioridade do processo
-	IO_Operation* IOs;		// Array de momentos de I/O
-
-private:
-	// Variaveis membro
-	const int m_MAX_ATTEMPTS = 100;
-	int m_tries = 0;
-	bool m_is_new_pid = false;
-	int m_pid = 0;
+  int PID;                      // Identificador do processo
+  int PPID = 1;                 // Identificador do processo pai (sempre = 1)
+  int status = STATUS_NEW;      // Status do processo
+  int priority = PRIORITY_HIGH; // Nível de prioridade do processo
+  int total_time;               // Tempo total a ser executado
+  int start_time;               // Momento em que o processo inicia
+  int elapsed_time = 0;         // Tempo já executado
+  IO_Operation* IOs;            // Array de momentos de I/O
 
 public:
-	//Construtores com e sem passagem dos parametros total_time & ios
-	Process() : PID( generatePID() ), status(STATUS_NEW), priority(PRIORITY_HIGH) {}
+  // Caso só exista parâmetro de tempo total, assumimos que não há I/O,
+  // e que o processo inicia imediatamente
+  Process(int total_time):
+    PID( generatePID() ),
+    total_time(total_time),
+    start_time(0) {}
 
-	Process( int total_time, IO_Operation* ios) : PID( generatePID() ), status(STATUS_NEW),
-	 priority(PRIORITY_HIGH), total_time(total_time), IOs(ios), elapsed_time(0) {}
-	
+  Process(int total_time, int start_time):
+    PID( generatePID() ),
+    total_time(total_time),
+    start_time(start_time) {}
+
+  Process(int total_time, IO_Operation* ios):
+    PID( generatePID() ),
+    total_time(total_time),
+    start_time(0),
+    IOs(ios) {}
+
+  Process(int total_time, int start_time, IO_Operation* ios):
+    PID( generatePID() ),
+    total_time(total_time),
+    start_time(start_time),
+    IOs(ios) {}
+
 private:
-
-	//Gera PID novo, exclusivo para o processo
-	int generatePID() {
-		while(!m_is_new_pid) {
-
-			// Gera PID entre (1,99]
-			m_pid = (std::rand() % 98)+2;
-
-			// Confere se o PID já existe
-			m_is_new_pid = true;
-			for(int i = 0; i < MAX_PROCESSES; ++i) {
-				if(PIDs[i] == m_pid) {			// Se o PID já está presente na lista, precisamos gerar outro
-					m_is_new_pid = false;				// Sai do `for` e garante outro loop do `while` externo
-					break;			
-				}
-			}
-
-			// Incrementa número de tentativas de gerar um PID novo
-			m_tries++;
-			// Se as tentativas ultrapassarem o limite, retorna valor de -1
-			if(m_tries > m_MAX_ATTEMPTS)
-				return -1;
-		}
-		return m_pid;
-	}
-
+  // Gera PID novo, exclusivo para o processo
+  int generatePID() {
+    // Se o número de processos ainda não ultrapassou o limite
+    if(process_count < MAX_PROCESSES) {
+      // Aumenta o número de processos
+      process_count++;
+      // Retorna o valor
+      return process_count;
+    }
+    return -1;
+  }
 };
 
-
-// Função de sleep (em ms)
-// [Ref] stackoverflow.com/a/28827188/4824627
-void sleep_ms(int milliseconds) {
-  struct timespec ts;
-  ts.tv_sec = milliseconds / 1000;
-  ts.tv_nsec = (milliseconds % 1000) * 1000000;
-  nanosleep(&ts, NULL);
+// Operador << para impressão de objetos Process
+std::ostream& operator <<(std::ostream& o, const Process* p) {
+  return o << "[Process](PID=" << p->PID << ")"
+           << "(elapsed=" << p->elapsed_time << ")"
+           << "(total=" << p->total_time << ")";
 }
 
 IO_Operation createIO(int type, int start_time) {
@@ -118,22 +119,103 @@ IO_Operation createIO(int type, int start_time) {
   return ret;
 }
 
+// Inicializa processos
+void initializeProcesses(Process** all_processes) {
+  IO_Operation a[1] = { createIO(IO_IMPRESSORA,2) };
+  IO_Operation b[2] = { createIO(IO_IMPRESSORA,4), createIO(IO_FITA,7) };
+  IO_Operation c[3] = { createIO(IO_DISCO,1), createIO(IO_FITA,2), createIO(IO_IMPRESSORA,6) };
+
+  IO_Operation* example_io[3] = { a, b, c };
+
+  for(int i = 0; i < MAX_PROCESSES; ++i) {
+    int t = i % 4;
+    if(t < 3)
+      all_processes[i] = new Process(5, (std::rand() % 10)+2, example_io[t]);
+    else
+      all_processes[i] = new Process(5, (std::rand() % 10)+2);
+    std::cout << "Processo (PID " << all_processes[i]->PID << ") criado: ";
+    std::cout << "start_time=" << all_processes[i]->start_time << " ";
+    std::cout << "total_time=" << all_processes[i]->start_time << std::endl;
+  }
+}
+
+
+int hasUnfinishedProcess(Process** all_processes) {
+  // Confere se algum processo não possui status de TERMINATED
+  for(int i = 0; i < MAX_PROCESSES; ++i)
+    if(all_processes[i]->status != STATUS_TERMINATED)
+      return true;
+  // Senão, se todos já possuem status TERMINATED
+  return false;
+}
+
+void checkForNewProcess(Process** all_processes, int cycle_count) {
+  for(int i = 0; i < MAX_PROCESSES; ++i) {
+    if(all_processes[i]->start_time == cycle_count) {
+      std::cout << "\t" << all_processes[i] << std::endl;
+    }
+  }
+}
+void checkForFinishedIO(int cycle_count) {
+  // TODO: essa função
+  (void)cycle_count; // (evita warnings de unused)
+}
+void checkForPreemption() {
+  // TODO: essa função
+}
+
 int main() {
   // Determina seed para a função de random
   srand(time(NULL));
 
-  IO_Operation test_ios[3] = {
-    createIO(IO_FITA,2),
-    createIO(IO_DISCO,1),
-    createIO(IO_IMPRESSORA,6)
-  };
+  // Cria lista de todos os processos
+  Process** all_processes;
+  all_processes = (Process**)calloc(sizeof(Process*),MAX_PROCESSES);
+  if(all_processes == NULL) {
+    // Erro criando lista de processos
+    std::cout << "calloc falhou!" << std::endl;
+    exit(1);
+  }
+  // Inicializa os processos (hardcoded)
+  initializeProcesses(all_processes);
 
-  Process p(10, test_ios);
+  sleep_ms(500);
+  std::cout << std::endl;
+  std::cout << "Todos os processos criados! Iniciando processador..." << std::endl;
+  std::cout << std::endl;
+  sleep_ms(1500);
 
-  std::cout << "Processo de PID " << p.PID << std::endl;
-  std::cout << "\tTotal time: " << p.total_time << " u.t." << std::endl;
-  std::cout << "\tElapsed time: " << p.elapsed_time << " u.t." << std::endl;
+  // Contagem de ciclos do processador
+  int global_cycle_count = 0;
 
-  // sleep_ms(200);
+  while(true) {
+    std::cout << "Ciclo: " << global_cycle_count << std::endl;
+
+    // Confere se ainda existe algum processo inacabado
+    if(!hasUnfinishedProcess(all_processes))
+      // Se não existe, termina o loop
+      break;
+
+
+    // Confere se existe algum processo que inicia nesse ciclo
+    // (e o coloca na fila apropriada)
+    checkForNewProcess(all_processes, global_cycle_count);
+
+    // Confere se algum processo acabou de terminar operação de I/O
+    // (e o coloca na fila apropriada)
+    checkForFinishedIO(global_cycle_count);
+
+    // Confere se o processo sendo executado deve sofrer preempção
+    checkForPreemption();
+
+    // Incrementa o ciclo atual
+    global_cycle_count++;
+
+    /*TEMPORARIO*/if(global_cycle_count >= 20) break;
+
+    sleep_ms(400);
+  }
+
+  std::cout << "Programa terminado!" << std::endl;
   return 0;
 }
