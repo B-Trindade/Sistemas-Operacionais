@@ -27,11 +27,11 @@ enum Status {
 int getIODuration(int io) {
   // TODO: modificar os tempos
   switch(io) {
-    case DISCO:
+    case IO_DISCO:
       return 100;
-    case FITA:
+    case IO_FITA:
       return 101;
-    case IMPRESSORA:
+    case IO_IMPRESSORA:
       return 102;
     default:
       return 0;
@@ -43,50 +43,64 @@ typedef struct IO_Operation {
   int start_time;       // Momento de início do IO
 } IO_Operation;
 
-typedef struct Process {
-  int PID;             // Identificador do processo
-  int PPID;            // Identificador do processo pai (sempre = 1)
-  int status;          // Status do processo
-  int total_time;      // Tempo total a ser executado
-  int elapsed_time;    // Tempo já executado
-  int priority;        // Nível de prioridade do processo
-  IO_Operation* IOs;   // Array de momentos de I/O
-} Process;
 
 // Inicializa o array de PIDs com 0s
-Process PIDs[MAX_PROCESSES] = {};
+int PIDs[MAX_PROCESSES] = {};
 
-// Gera PID novo, distinto de qualquer um presente no array de PIDs
-int generatePID() {
-  const int MAX_ATTEMPTS = 100;
-  int tries = 0;
+class Process
+{
+public:
+	int PID;				// Identificador do processo
+	int PPID;				// Identificador do processo pai (sempre = 1)
+	int status;				// Status do processo
+	int total_time;			// Tempo total a ser executado
+	int elapsed_time;		// Tempo já executado
+	int priority;			// Nível de prioridade do processo
+	IO_Operation* IOs;		// Array de momentos de I/O
 
-  bool is_new_pid = false;
-  int pid = 0;
+private:
+	// Variaveis membro
+	const int m_MAX_ATTEMPTS = 100;
+	int m_tries = 0;
+	bool m_is_new_pid = false;
+	int m_pid = 0;
 
-  while(!is_new_pid) {
-    // Gera PID entre (1,99]
-    pid = (std::rand() % 98)+2;
+public:
+	//Construtores com e sem passagem dos parametros total_time & ios
+	Process() : PID( generatePID() ), status(STATUS_NEW), priority(PRIORITY_HIGH) {}
 
-    // Confere se o PID já existe
-    is_new_pid = true;
-    for(int i = 0; i < MAX_PROCESSES; ++i) {
-      // Se o PID já está presente na lista, precisamos gerar outro
-      // Sai do `for` e garante outro loop do `while` externo
-      if(PIDs[i].PID == pid) {
-        is_new_pid = false;
-        break;
-      }
-    }
+	Process( int total_time, IO_Operation* ios) : PID( generatePID() ), status(STATUS_NEW),
+	 priority(PRIORITY_HIGH), total_time(total_time), IOs(ios), elapsed_time(0) {}
+	
+private:
 
-    // Incrementa número de tentativas de gerar um PID novo
-    tries++;
-    // Se as tentativas ultrapassarem o limite, retorna valor de -1
-    if(tries > MAX_ATTEMPTS)
-      return -1;
-  }
-  return pid;
-}
+	//Gera PID novo, exclusivo para o processo
+	int generatePID() {
+		while(!m_is_new_pid) {
+
+			// Gera PID entre (1,99]
+			m_pid = (std::rand() % 98)+2;
+
+			// Confere se o PID já existe
+			m_is_new_pid = true;
+			for(int i = 0; i < MAX_PROCESSES; ++i) {
+				if(PIDs[i] == m_pid) {			// Se o PID já está presente na lista, precisamos gerar outro
+					m_is_new_pid = false;				// Sai do `for` e garante outro loop do `while` externo
+					break;			
+				}
+			}
+
+			// Incrementa número de tentativas de gerar um PID novo
+			m_tries++;
+			// Se as tentativas ultrapassarem o limite, retorna valor de -1
+			if(m_tries > m_MAX_ATTEMPTS)
+				return -1;
+		}
+		return m_pid;
+	}
+
+};
+
 
 // Função de sleep (em ms)
 // [Ref] stackoverflow.com/a/28827188/4824627
@@ -104,26 +118,17 @@ IO_Operation createIO(int type, int start_time) {
   return ret;
 }
 
-Process createProcess(int total_time, IO_Operation* ios) {
-  Process p;
-  p.PID = generatePID();
-  p.total_time = total_time;
-  p.elapsed_time = 0;
-  p.IOs = ios;
-  return p;
-}
-
-
 int main() {
   // Determina seed para a função de random
   srand(time(NULL));
 
   IO_Operation test_ios[3] = {
-    createIO(FITA,2),
-    createIO(DISCO,1),
-    createIO(IMPRESSORA,6)
+    createIO(IO_FITA,2),
+    createIO(IO_DISCO,1),
+    createIO(IO_IMPRESSORA,6)
   };
-  Process p = createProcess(10, test_ios);
+
+  Process p(10, test_ios);
 
   std::cout << "Processo de PID " << p.PID << std::endl;
   std::cout << "\tTotal time: " << p.total_time << " u.t." << std::endl;
