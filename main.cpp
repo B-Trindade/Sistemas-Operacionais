@@ -2,8 +2,12 @@
 #include <time.h>
 #include <stdlib.h>
 #include <iostream>
+#include <iterator>
 
 #define MAX_PROCESSES 10
+
+int current_process_index = -1;
+int process_count = 0;
 
 // Função de sleep (em ms)
 // [Ref] stackoverflow.com/a/28827188/4824627
@@ -52,8 +56,6 @@ typedef struct IO_Operation {
   int type;             // Identificador do IO
   int start_time;       // Momento de início do IO
 } IO_Operation;
-
-int process_count = 0;
 
 class Process {
 public:
@@ -105,11 +107,36 @@ private:
   }
 };
 
-// Operador << para impressão de objetos Process
+std::ostream& operator<<(std::ostream& o, const IO_Operation& op) {
+  return o << "IO[" << op.type << ";" << op.start_time << "]";
+}
+std::ostream& operator<<(std::ostream& o, const IO_Operation* arr) {
+  if(!arr)
+    return o << "(empty)";
+
+  for(int i = 0; i < 50; ++i) {
+    if(arr[i].type == -1 || arr[i].start_time == -1)
+      break;
+
+    o << arr[i];
+  }
+
+  return o;
+}
+// Operador << para impressão de ponteiros de Process
 std::ostream& operator <<(std::ostream& o, const Process* p) {
-  return o << "[Process](PID=" << p->PID << ")"
+  return o << "[*Process](PID=" << p->PID << ")"
            << "(elapsed=" << p->elapsed_time << ")"
-           << "(total=" << p->total_time << ")";
+           << "(total=" << p->total_time << ")"
+           << "(IOs=" << p->IOs << ")";
+}
+
+// Operador << para impressão de referências de Process
+std::ostream& operator <<(std::ostream& o, const Process& p) {
+  return o << "[Process](PID=" << p.PID << ")"
+           << "(elapsed=" << p.elapsed_time << ")"
+           << "(total=" << p.total_time << ")"
+           << "(IOs=" << p.IOs << ")";
 }
 
 IO_Operation createIO(int type, int start_time) {
@@ -119,26 +146,37 @@ IO_Operation createIO(int type, int start_time) {
   return ret;
 }
 
+// Quando são colocados dentro da função `initializeProcesses()`, essas
+// variáveis são descartadas e removidas da memória; assim, o Process fica com
+// lixo no lugar :(
+IO_Operation IO_Limiter = createIO(-1,-1);
+IO_Operation a[2] = { createIO(IO_IMPRESSORA,2), IO_Limiter };
+IO_Operation b[3] = { createIO(IO_IMPRESSORA,4), createIO(IO_FITA,7), IO_Limiter };
+IO_Operation c[4] = { createIO(IO_DISCO,1), createIO(IO_FITA,2), createIO(IO_IMPRESSORA,6),IO_Limiter };
+
 // Inicializa processos
 void initializeProcesses(Process** all_processes) {
-  IO_Operation a[1] = { createIO(IO_IMPRESSORA,2) };
-  IO_Operation b[2] = { createIO(IO_IMPRESSORA,4), createIO(IO_FITA,7) };
-  IO_Operation c[3] = { createIO(IO_DISCO,1), createIO(IO_FITA,2), createIO(IO_IMPRESSORA,6) };
-
-  IO_Operation* example_io[3] = { a, b, c };
-
   for(int i = 0; i < MAX_PROCESSES; ++i) {
     int t = i % 4;
-    if(t < 3)
-      all_processes[i] = new Process(5, (std::rand() % 10)+2, example_io[t]);
-    else
-      all_processes[i] = new Process(5, (std::rand() % 10)+2);
-    std::cout << "Processo (PID " << all_processes[i]->PID << ") criado: ";
-    std::cout << "start_time=" << all_processes[i]->start_time << " ";
-    std::cout << "total_time=" << all_processes[i]->start_time << std::endl;
+    switch(t) {
+      case 0: {
+        all_processes[i] = new Process(5, (std::rand() % 10)+2, a);
+        break;
+      } case 1: {
+        all_processes[i] = new Process(5, (std::rand() % 10)+2, b);
+        break;
+      } case 2: {
+        all_processes[i] = new Process(5, (std::rand() % 10)+2, c);
+        break;
+      } case 3: {
+        all_processes[i] = new Process(5, (std::rand() % 10)+2);
+        break;
+      }
+    }
+    std::cout << "Processo (PID " << all_processes[i]->PID << ") criado: "
+              << all_processes[i] << std::endl;
   }
 }
-
 
 int hasUnfinishedProcess(Process** all_processes) {
   // Confere se algum processo não possui status de TERMINATED
@@ -152,16 +190,32 @@ int hasUnfinishedProcess(Process** all_processes) {
 void checkForNewProcess(Process** all_processes, int cycle_count) {
   for(int i = 0; i < MAX_PROCESSES; ++i) {
     if(all_processes[i]->start_time == cycle_count) {
-      std::cout << "\t" << all_processes[i] << std::endl;
+      all_processes[i]->status = STATUS_READY;
+      std::cout << "\tProcesso " << all_processes[i]->PID << " está pronto para ser executado!" << std::endl;
     }
   }
 }
 void checkForFinishedIO(int cycle_count) {
   // TODO: essa função
   (void)cycle_count; // (evita warnings de unused)
+  std::cout << "\tConferindo por processos que terminaram IO..." << std::endl;
+  std::cout << "\tNenhum processo terminou IO!" << std::endl;
 }
 void checkForPreemption() {
   // TODO: essa função
+}
+int tryRunNewProcess(Process** all_processes) {
+  std::cout << "\tNão há processos executando. Procurando um processo com estado "
+            << "'READY' para ser executado." << std::endl;
+  for(int i = 0; i < MAX_PROCESSES; ++i) {
+    if(all_processes[i]->status == STATUS_READY) {
+      std::cout << "\tEncontrado! Executando processo " << all_processes[i]->PID << std::endl;
+      all_processes[i]->status = STATUS_RUNNING;
+      return i;
+    }
+  }
+  std::cout << "\tNenhum processo encontrado!" << std::endl;
+  return -1;
 }
 
 int main() {
@@ -191,29 +245,56 @@ int main() {
   while(true) {
     std::cout << "Ciclo: " << global_cycle_count << std::endl;
 
-    // Confere se ainda existe algum processo inacabado
-    if(!hasUnfinishedProcess(all_processes))
-      // Se não existe, termina o loop
-      break;
+    // TODO: código mais temporário que qualquer outra coisa
+    // talvez mudar pra uma função separada seja melhor?
+    if(current_process_index >= 0) {
+      // TODO: conferir se está em IO etc
+      Process* current_process = all_processes[current_process_index];
+      current_process->elapsed_time++;
+      std::cout << "\tExecutando processo " << current_process->PID << std::endl;
+      int diff = current_process->total_time - current_process->elapsed_time;
+      std::cout << "\tFalta " << (diff) << " u.t." << std::endl;
+      if(diff == 0) {
+        std::cout << "\tProcesso terminado!" << std::endl;
+        current_process->status = STATUS_TERMINATED;
+        current_process_index = -1;
+      }
+    } else {
+      // Confere se ainda existe algum processo inacabado
+      if(!hasUnfinishedProcess(all_processes))
+        // Se não existe, termina o loop
+        break;
+    }
 
+    sleep_ms(500);
 
     // Confere se existe algum processo que inicia nesse ciclo
     // (e o coloca na fila apropriada)
     checkForNewProcess(all_processes, global_cycle_count);
 
+    sleep_ms(500);
+
     // Confere se algum processo acabou de terminar operação de I/O
     // (e o coloca na fila apropriada)
     checkForFinishedIO(global_cycle_count);
 
+    sleep_ms(500);
+
     // Confere se o processo sendo executado deve sofrer preempção
     checkForPreemption();
+
+    sleep_ms(500);
+
+    // (TODO: conferir essa ordem de prioridades)
+    if(current_process_index < 0)
+      current_process_index = tryRunNewProcess(all_processes);
+
+    sleep_ms(500);
 
     // Incrementa o ciclo atual
     global_cycle_count++;
 
-    /*TEMPORARIO*/if(global_cycle_count >= 20) break;
-
-    sleep_ms(400);
+    sleep_ms(1500);
   }
 
   std::cout << "Programa terminado!" << std::endl;
