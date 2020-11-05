@@ -109,10 +109,10 @@ private:
   }
 };
 
-std::ostream& operator<<(std::ostream& o, const IO_Operation& op) {
+std::ostream& operator <<(std::ostream& o, const IO_Operation& op) {
   return o << "IO[" << op.type << ";" << op.start_time << "]";
 }
-std::ostream& operator<<(std::ostream& o, const IO_Operation* arr) {
+std::ostream& operator <<(std::ostream& o, const IO_Operation* arr) {
   if(!arr)
     return o << "(empty)";
 
@@ -128,6 +128,7 @@ std::ostream& operator<<(std::ostream& o, const IO_Operation* arr) {
 // Operador << para impressão de ponteiros de Process
 std::ostream& operator <<(std::ostream& o, const Process* p) {
   return o << "[*Process](PID=" << p->PID << ")"
+           << "(start=" << p->start_time << ")"
            << "(remaining=" << p->remaining_time << ")"
            << "(total=" << p->total_time << ")"
            << "(IOs=" << p->IOs << ")";
@@ -136,6 +137,7 @@ std::ostream& operator <<(std::ostream& o, const Process* p) {
 // Operador << para impressão de referências de Process
 std::ostream& operator <<(std::ostream& o, const Process& p) {
   return o << "[Process](PID=" << p.PID << ")"
+           << "(start=" << p.start_time << ")"
            << "(remaining=" << p.remaining_time << ")"
            << "(total=" << p.total_time << ")"
            << "(IOs=" << p.IOs << ")";
@@ -147,6 +149,40 @@ Process** all_processes;
 Process** high_processes;
 // Lista de processos com BAIXA prioridade
 Process** low_processes;
+
+// Controladores das listas
+typedef struct ListController {
+  int start_index;  // Index do primeiro item da lista
+  int length;       // Tamanho de itens da lista
+  Process*** list;   // Ponteiro para a lista
+} ListController;
+
+ListController createLC(Process**& list) {
+  ListController ret;
+  ret.start_index = 0;
+  ret.length = 0;
+  ret.list = &list;
+  return ret;
+}
+
+ListController high = createLC(high_processes);
+ListController low = createLC(low_processes);
+
+Process* first(ListController& lc) {
+  return (*lc.list)[lc.start_index];
+}
+void push(ListController& lc, Process* proc) {
+  lc.length++;
+  int index = (lc.start_index + lc.length - 1) % MAX_PROCESSES;
+  std::cout << "\tInserindo processo " << proc->PID << " em [" << index << "]" << std::endl;
+  (*lc.list)[index] = proc;
+}
+Process* shift(ListController& lc) {
+  Process* first = (*lc.list)[lc.start_index];
+  lc.start_index = (lc.start_index + 1) % MAX_PROCESSES;
+  lc.length--;
+  return first;
+}
 
 
 IO_Operation createIO(int type, int start_time) {
@@ -170,7 +206,7 @@ void initializeProcesses() {
   for(int i = 0; i < MAX_PROCESSES; ++i) {
     int t = i % 4;
     int random_total_time = (std::rand() % 5)+2;
-    int random_start_time = (std::rand() % 10)+2;
+    int random_start_time = (std::rand() % 5)+1;
     switch(t) {
       case 0: {
         all_processes[i] = new Process(random_total_time, random_start_time, a);
@@ -193,15 +229,20 @@ void initializeProcesses() {
 
 void executeProcess() {
   // TODO: conferir se está em IO etc
-  Process* current_process = all_processes[current_process_index];
-  current_process->remaining_time--;
-  current_process->total_time--;
-  std::cout << "\tExecutando processo " << current_process->PID << std::endl;
-  std::cout << "\tFalta " << (current_process->total_time) << " u.t." << std::endl;
-  if(current_process->total_time <= 0) {
+  Process* proc = all_processes[current_process_index];
+  proc->remaining_time--;
+  proc->total_time--;
+  std::cout << "\tExecutando processo " << proc->PID << std::endl;
+  std::cout << "\tFalta " << (proc->total_time) << " u.t." << std::endl;
+  if(proc->total_time <= 0) {
     std::cout << "\tProcesso terminado!" << std::endl;
-    current_process->status = STATUS_TERMINATED;
+    proc->status = STATUS_TERMINATED;
     current_process_index = -1;
+    // Remove processo da lista em que ele está
+    if(proc->priority == PRIORITY_HIGH)
+      shift(high);
+    else
+      shift(low);
   }
 }
 
@@ -219,24 +260,43 @@ void checkForPreemption() {
   if(current_process_index < 0)
     return;
 
-  Process* current_process = all_processes[current_process_index];
+  Process* proc = all_processes[current_process_index];
 
   // Se o timeslice do processo já terminou, e ele ainda está executando
-  if(current_process->remaining_time <= 0
-  && current_process->status == STATUS_RUNNING) {
-    std::cout << "\tProcesso " << current_process->PID
+  if(proc->remaining_time <= 0
+  && proc->status == STATUS_RUNNING) {
+    std::cout << "\tProcesso " << proc->PID
               << " sofreu preempção!" << std::endl;
     // O coloca de volta em espera, com baixa prioridade
-    current_process->status = STATUS_READY;
-    current_process->priority = PRIORITY_LOW;
-    current_process_index = - 1;
+    proc->status = STATUS_READY;
+    current_process_index = -1;
+
+    if(proc->priority == PRIORITY_HIGH) {
+      // Se o processo possuía alta prioridade, remove ele da lista de alta
+      // prioridade
+      shift(high);
+    } else {
+      // Senão, remove ele da lista de baixa prioridade para que ele seja
+      // reinserido no final dela
+      shift(low);
+    }
+    // Insere o processo na lista de baixa prioridade
+    proc->priority = PRIORITY_LOW;
+    push(low, proc);
   }
 }
 void checkForNewProcess(int cycle_count) {
   for(int i = 0; i < MAX_PROCESSES; ++i) {
-    if(all_processes[i]->start_time == cycle_count) {
-      all_processes[i]->status = STATUS_READY;
-      std::cout << "\tProcesso " << all_processes[i]->PID << " está pronto para ser executado!" << std::endl;
+    Process* proc = all_processes[i];
+    // Se o processo inicia nesse ciclo
+    if(proc->start_time == cycle_count) {
+      // Atualiza seu status
+      proc->status = STATUS_READY;
+      // E o coloca na lista de alta prioridade
+      proc->priority = PRIORITY_HIGH;
+      push(high, proc);
+
+      std::cout << "\tProcesso " << proc->PID << " está pronto para ser executado!" << std::endl;
     }
   }
 }
@@ -251,16 +311,24 @@ void checkForFinishedIO(int cycle_count) {
 int tryRunNewProcess() {
   std::cout << "\tNão há processos executando. Procurando um processo com estado "
             << "'READY' para ser executado." << std::endl;
+  Process* proc;
+  if(high.length > 0) {
+    proc = first(high);
+  } else if(low.length > 0) {
+    proc = first(low);
+  } else {
+    std::cout << "\tNenhum processo encontrado!" << std::endl;
+    return -1;
+  }
   for(int i = 0; i < MAX_PROCESSES; ++i) {
-    Process* proc = all_processes[i];
-    if(proc->status == STATUS_READY && proc->priority == PRIORITY_HIGH) {
+    if(proc == all_processes[i]) {
       std::cout << "\tEncontrado! Executando processo " << proc->PID << std::endl;
       proc->status = STATUS_RUNNING;
       proc->remaining_time = TIME_SLICE;
       return i;
     }
   }
-  std::cout << "\tNenhum processo encontrado!" << std::endl;
+  std::cout << "WOOPS" << std::endl;
   return -1;
 }
 
