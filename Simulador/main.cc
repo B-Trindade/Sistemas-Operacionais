@@ -4,11 +4,10 @@
 #include <iostream>
 #include <iterator>
 
-#define MAX_PROCESSES 5
-#define TIME_SLICE 2
-
-int current_process_index = -1;
-int process_count = 0;
+#include "enum.hh"
+#include "declares.hh"
+#include "Process.hh"
+#include "ListController.hh"
 
 // Função de sleep (em ms)
 // [Ref] stackoverflow.com/a/28827188/4824627
@@ -19,130 +18,6 @@ void sleep_ms(int milliseconds) {
   nanosleep(&ts, NULL);
 }
 
-enum IOTypes {
-  IO_DISCO = 0,
-  IO_FITA,
-  IO_IMPRESSORA
-};
-
-enum Priorities {
-  PRIORITY_HIGH = 0,
-  PRIORITY_LOW,
-  PRIORITY_IO
-};
-
-enum Status {
-  STATUS_NEW = 0,   // Foi criado, ainda não está na fila
-  STATUS_READY,     // Esperando ser executado
-  STATUS_RUNNING,   // Está sendo executado
-  STATUS_WAITING,   // Entrou em IO / realizando IO
-  STATUS_TERMINATED // Processo acabou
-};
-
-int getIODuration(int io) {
-  // TODO: modificar os tempos
-  switch(io) {
-    case IO_DISCO:
-      return 100;
-    case IO_FITA:
-      return 101;
-    case IO_IMPRESSORA:
-      return 102;
-    default:
-      return 0;
-  }
-}
-
-typedef struct IO_Operation {
-  int type;             // Identificador do IO
-  int start_time;       // Momento de início do IO
-  int time_left;        // Tempo que falta para IO acabar
-} IO_Operation;
-
-class Process {
-public:
-  int PID;                      // Identificador do processo
-  int PPID = 1;                 // Identificador do processo pai (sempre = 1)
-  int status = STATUS_NEW;      // Status do processo
-  int priority = PRIORITY_HIGH; // Nível de prioridade do processo
-  int total_time;               // Tempo total a ser executado
-  int start_time;               // Momento em que o processo inicia
-  int remaining_time = 0;       // Tempo já executado (nesse timeslice)
-  IO_Operation* IOs;            // Array de momentos de I/O
-
-public:
-  // Caso só exista parâmetro de tempo total, assumimos que não há I/O,
-  // e que o processo inicia imediatamente
-  Process(int total_time):
-    PID( generatePID() ),
-    total_time(total_time),
-    start_time(0) {}
-
-  Process(int total_time, int start_time):
-    PID( generatePID() ),
-    total_time(total_time),
-    start_time(start_time) {}
-
-  Process(int total_time, IO_Operation* ios):
-    PID( generatePID() ),
-    total_time(total_time),
-    start_time(0),
-    IOs(ios) {}
-
-  Process(int total_time, int start_time, IO_Operation* ios):
-    PID( generatePID() ),
-    total_time(total_time),
-    start_time(start_time),
-    IOs(ios) {}
-
-private:
-  // Gera PID novo, exclusivo para o processo
-  int generatePID() {
-    // Se o número de processos ainda não ultrapassou o limite
-    if(process_count < MAX_PROCESSES) {
-      // Aumenta o número de processos
-      process_count++;
-      // Retorna o valor
-      return process_count;
-    }
-    return -1;
-  }
-};
-
-std::ostream& operator <<(std::ostream& o, const IO_Operation& op) {
-  return o << "IO[" << op.type << ";" << op.start_time << "]";
-}
-std::ostream& operator <<(std::ostream& o, const IO_Operation* arr) {
-  if(!arr)
-    return o << "(empty)";
-
-  for(int i = 0; i < 50; ++i) {
-    if(arr[i].type == -1 || arr[i].start_time == -1)
-      break;
-
-    o << arr[i];
-  }
-
-  return o;
-}
-// Operador << para impressão de ponteiros de Process
-std::ostream& operator <<(std::ostream& o, const Process* p) {
-  return o << "[*Process](PID=" << p->PID << ")"
-           << "(start=" << p->start_time << ")"
-           << "(remaining=" << p->remaining_time << ")"
-           << "(total=" << p->total_time << ")"
-           << "(IOs=" << p->IOs << ")";
-}
-
-// Operador << para impressão de referências de Process
-std::ostream& operator <<(std::ostream& o, const Process& p) {
-  return o << "[Process](PID=" << p.PID << ")"
-           << "(start=" << p.start_time << ")"
-           << "(remaining=" << p.remaining_time << ")"
-           << "(total=" << p.total_time << ")"
-           << "(IOs=" << p.IOs << ")";
-}
-
 // Lista de todos os processos
 Process** all_processes;
 // Lista de processos com ALTA prioridade
@@ -150,48 +25,8 @@ Process** high_processes;
 // Lista de processos com BAIXA prioridade
 Process** low_processes;
 
-// Controladores das listas
-typedef struct ListController {
-  int start_index;  // Index do primeiro item da lista
-  int length;       // Tamanho de itens da lista
-  Process*** list;   // Ponteiro para a lista
-} ListController;
-
-ListController createLC(Process**& list) {
-  ListController ret;
-  ret.start_index = 0;
-  ret.length = 0;
-  ret.list = &list;
-  return ret;
-}
-
 ListController high = createLC(high_processes);
 ListController low = createLC(low_processes);
-
-Process* first(ListController& lc) {
-  return (*lc.list)[lc.start_index];
-}
-void push(ListController& lc, Process* proc) {
-  lc.length++;
-  int index = (lc.start_index + lc.length - 1) % MAX_PROCESSES;
-  std::cout << "\tInserindo processo " << proc->PID << " em [" << index << "]" << std::endl;
-  (*lc.list)[index] = proc;
-}
-Process* shift(ListController& lc) {
-  Process* first = (*lc.list)[lc.start_index];
-  lc.start_index = (lc.start_index + 1) % MAX_PROCESSES;
-  lc.length--;
-  return first;
-}
-
-
-IO_Operation createIO(int type, int start_time) {
-  IO_Operation ret;
-  ret.type = type;
-  ret.start_time = start_time;
-  ret.time_left = getIODuration(type);
-  return ret;
-}
 
 // Quando são colocados dentro da função `initializeProcesses()`, essas
 // variáveis são descartadas e removidas da memória; assim, o Process fica com
@@ -301,13 +136,6 @@ void checkForNewProcess(int cycle_count) {
   }
 }
 
-void checkForFinishedIO(int cycle_count) {
-  // TODO: essa função
-  (void)cycle_count; // (evita warnings de unused)
-  std::cout << "\tConferindo por processos que terminaram IO..." << std::endl;
-  std::cout << "\tNenhum processo terminou IO!" << std::endl;
-}
-
 int tryRunNewProcess() {
   std::cout << "\tNão há processos executando. Procurando um processo com estado "
             << "'READY' para ser executado." << std::endl;
@@ -328,7 +156,7 @@ int tryRunNewProcess() {
       return i;
     }
   }
-  std::cout << "WOOPS" << std::endl;
+  std::cout << "WOOPS EM BREVE: TELA AZUL c:" << std::endl;
   return -1;
 }
 
@@ -340,6 +168,13 @@ void initializeList(Process**& list) {
     exit(1);
   }
 }
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
 
 int main() {
   // Determina seed para a função de random
