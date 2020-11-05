@@ -4,7 +4,8 @@
 #include <iostream>
 #include <iterator>
 
-#define MAX_PROCESSES 10
+#define MAX_PROCESSES 5
+#define TIME_SLICE 2
 
 int current_process_index = -1;
 int process_count = 0;
@@ -55,6 +56,7 @@ int getIODuration(int io) {
 typedef struct IO_Operation {
   int type;             // Identificador do IO
   int start_time;       // Momento de início do IO
+  int time_left;        // Tempo que falta para IO acabar
 } IO_Operation;
 
 class Process {
@@ -65,7 +67,7 @@ public:
   int priority = PRIORITY_HIGH; // Nível de prioridade do processo
   int total_time;               // Tempo total a ser executado
   int start_time;               // Momento em que o processo inicia
-  int elapsed_time = 0;         // Tempo já executado
+  int remaining_time = 0;       // Tempo já executado (nesse timeslice)
   IO_Operation* IOs;            // Array de momentos de I/O
 
 public:
@@ -126,7 +128,7 @@ std::ostream& operator<<(std::ostream& o, const IO_Operation* arr) {
 // Operador << para impressão de ponteiros de Process
 std::ostream& operator <<(std::ostream& o, const Process* p) {
   return o << "[*Process](PID=" << p->PID << ")"
-           << "(elapsed=" << p->elapsed_time << ")"
+           << "(remaining=" << p->remaining_time << ")"
            << "(total=" << p->total_time << ")"
            << "(IOs=" << p->IOs << ")";
 }
@@ -134,15 +136,24 @@ std::ostream& operator <<(std::ostream& o, const Process* p) {
 // Operador << para impressão de referências de Process
 std::ostream& operator <<(std::ostream& o, const Process& p) {
   return o << "[Process](PID=" << p.PID << ")"
-           << "(elapsed=" << p.elapsed_time << ")"
+           << "(remaining=" << p.remaining_time << ")"
            << "(total=" << p.total_time << ")"
            << "(IOs=" << p.IOs << ")";
 }
+
+// Lista de todos os processos
+Process** all_processes;
+// Lista de processos com ALTA prioridade
+Process** high_processes;
+// Lista de processos com BAIXA prioridade
+Process** low_processes;
+
 
 IO_Operation createIO(int type, int start_time) {
   IO_Operation ret;
   ret.type = type;
   ret.start_time = start_time;
+  ret.time_left = getIODuration(type);
   return ret;
 }
 
@@ -155,21 +166,23 @@ IO_Operation b[3] = { createIO(IO_IMPRESSORA,4), createIO(IO_FITA,7), IO_Limiter
 IO_Operation c[4] = { createIO(IO_DISCO,1), createIO(IO_FITA,2), createIO(IO_IMPRESSORA,6),IO_Limiter };
 
 // Inicializa processos
-void initializeProcesses(Process** all_processes) {
+void initializeProcesses() {
   for(int i = 0; i < MAX_PROCESSES; ++i) {
     int t = i % 4;
+    int random_total_time = (std::rand() % 5)+2;
+    int random_start_time = (std::rand() % 10)+2;
     switch(t) {
       case 0: {
-        all_processes[i] = new Process(5, (std::rand() % 10)+2, a);
+        all_processes[i] = new Process(random_total_time, random_start_time, a);
         break;
       } case 1: {
-        all_processes[i] = new Process(5, (std::rand() % 10)+2, b);
+        all_processes[i] = new Process(random_total_time, random_start_time, b);
         break;
       } case 2: {
-        all_processes[i] = new Process(5, (std::rand() % 10)+2, c);
+        all_processes[i] = new Process(random_total_time, random_start_time, c);
         break;
       } case 3: {
-        all_processes[i] = new Process(5, (std::rand() % 10)+2);
+        all_processes[i] = new Process(random_total_time, random_start_time);
         break;
       }
     }
@@ -178,7 +191,22 @@ void initializeProcesses(Process** all_processes) {
   }
 }
 
-int hasUnfinishedProcess(Process** all_processes) {
+void executeProcess() {
+  // TODO: conferir se está em IO etc
+  Process* current_process = all_processes[current_process_index];
+  current_process->remaining_time--;
+  current_process->total_time--;
+  std::cout << "\tExecutando processo " << current_process->PID << std::endl;
+  std::cout << "\tFalta " << (current_process->total_time) << " u.t." << std::endl;
+  if(current_process->total_time <= 0) {
+    std::cout << "\tProcesso terminado!" << std::endl;
+    current_process->status = STATUS_TERMINATED;
+    current_process_index = -1;
+  }
+}
+
+int hasUnfinishedProcess() {
+  std::cout << "\tConferindo se ainda existe processo a ser executado" << std::endl;
   // Confere se algum processo não possui status de TERMINATED
   for(int i = 0; i < MAX_PROCESSES; ++i)
     if(all_processes[i]->status != STATUS_TERMINATED)
@@ -187,7 +215,24 @@ int hasUnfinishedProcess(Process** all_processes) {
   return false;
 }
 
-void checkForNewProcess(Process** all_processes, int cycle_count) {
+void checkForPreemption() {
+  if(current_process_index < 0)
+    return;
+
+  Process* current_process = all_processes[current_process_index];
+
+  // Se o timeslice do processo já terminou, e ele ainda está executando
+  if(current_process->remaining_time <= 0
+  && current_process->status == STATUS_RUNNING) {
+    std::cout << "\tProcesso " << current_process->PID
+              << " sofreu preempção!" << std::endl;
+    // O coloca de volta em espera, com baixa prioridade
+    current_process->status = STATUS_READY;
+    current_process->priority = PRIORITY_LOW;
+    current_process_index = - 1;
+  }
+}
+void checkForNewProcess(int cycle_count) {
   for(int i = 0; i < MAX_PROCESSES; ++i) {
     if(all_processes[i]->start_time == cycle_count) {
       all_processes[i]->status = STATUS_READY;
@@ -195,22 +240,23 @@ void checkForNewProcess(Process** all_processes, int cycle_count) {
     }
   }
 }
+
 void checkForFinishedIO(int cycle_count) {
   // TODO: essa função
   (void)cycle_count; // (evita warnings de unused)
   std::cout << "\tConferindo por processos que terminaram IO..." << std::endl;
   std::cout << "\tNenhum processo terminou IO!" << std::endl;
 }
-void checkForPreemption() {
-  // TODO: essa função
-}
-int tryRunNewProcess(Process** all_processes) {
+
+int tryRunNewProcess() {
   std::cout << "\tNão há processos executando. Procurando um processo com estado "
             << "'READY' para ser executado." << std::endl;
   for(int i = 0; i < MAX_PROCESSES; ++i) {
-    if(all_processes[i]->status == STATUS_READY) {
-      std::cout << "\tEncontrado! Executando processo " << all_processes[i]->PID << std::endl;
-      all_processes[i]->status = STATUS_RUNNING;
+    Process* proc = all_processes[i];
+    if(proc->status == STATUS_READY && proc->priority == PRIORITY_HIGH) {
+      std::cout << "\tEncontrado! Executando processo " << proc->PID << std::endl;
+      proc->status = STATUS_RUNNING;
+      proc->remaining_time = TIME_SLICE;
       return i;
     }
   }
@@ -218,20 +264,26 @@ int tryRunNewProcess(Process** all_processes) {
   return -1;
 }
 
-int main() {
-  // Determina seed para a função de random
-  srand(time(NULL));
-
-  // Cria lista de todos os processos
-  Process** all_processes;
-  all_processes = (Process**)calloc(sizeof(Process*),MAX_PROCESSES);
-  if(all_processes == NULL) {
+void initializeList(Process**& list) {
+  list = (Process**)calloc(sizeof(Process*),MAX_PROCESSES);
+  if(list == NULL) {
     // Erro criando lista de processos
     std::cout << "calloc falhou!" << std::endl;
     exit(1);
   }
+}
+
+int main() {
+  // Determina seed para a função de random
+  srand(time(NULL));
+
+  // Cria as listas de processos
+  initializeList(all_processes);
+  initializeList(high_processes);
+  initializeList(low_processes);
+
   // Inicializa os processos (hardcoded)
-  initializeProcesses(all_processes);
+  initializeProcesses();
 
   sleep_ms(500);
   std::cout << std::endl;
@@ -243,34 +295,33 @@ int main() {
   int global_cycle_count = 0;
 
   while(true) {
-    std::cout << "Ciclo: " << global_cycle_count << std::endl;
+    // Incrementa o ciclo atual
+    global_cycle_count++;
+
+    std::cout << std::endl << "Ciclo: " << global_cycle_count << std::endl;
 
     // TODO: código mais temporário que qualquer outra coisa
     // talvez mudar pra uma função separada seja melhor?
     if(current_process_index >= 0) {
-      // TODO: conferir se está em IO etc
-      Process* current_process = all_processes[current_process_index];
-      current_process->elapsed_time++;
-      std::cout << "\tExecutando processo " << current_process->PID << std::endl;
-      int diff = current_process->total_time - current_process->elapsed_time;
-      std::cout << "\tFalta " << (diff) << " u.t." << std::endl;
-      if(diff == 0) {
-        std::cout << "\tProcesso terminado!" << std::endl;
-        current_process->status = STATUS_TERMINATED;
-        current_process_index = -1;
-      }
+      // Executa um ciclo do processo
+      executeProcess();
     } else {
       // Confere se ainda existe algum processo inacabado
-      if(!hasUnfinishedProcess(all_processes))
+      if(!hasUnfinishedProcess())
         // Se não existe, termina o loop
         break;
     }
 
     sleep_ms(500);
 
+    // Confere se o processo sendo executado deve sofrer preempção
+    checkForPreemption();
+
+    sleep_ms(500);
+
     // Confere se existe algum processo que inicia nesse ciclo
     // (e o coloca na fila apropriada)
-    checkForNewProcess(all_processes, global_cycle_count);
+    checkForNewProcess(global_cycle_count);
 
     sleep_ms(500);
 
@@ -280,19 +331,9 @@ int main() {
 
     sleep_ms(500);
 
-    // Confere se o processo sendo executado deve sofrer preempção
-    checkForPreemption();
-
-    sleep_ms(500);
-
     // (TODO: conferir essa ordem de prioridades)
     if(current_process_index < 0)
-      current_process_index = tryRunNewProcess(all_processes);
-
-    sleep_ms(500);
-
-    // Incrementa o ciclo atual
-    global_cycle_count++;
+      current_process_index = tryRunNewProcess();
 
     sleep_ms(1500);
   }
