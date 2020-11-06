@@ -20,18 +20,23 @@ int getIODuration(int io) {
 }
 
 std::ostream& operator <<(std::ostream& o, const IO_Operation& op) {
-  return o << "IO[" << op.type << ";" << op.start_time << "]";
+  if(op.done)
+    return o << "[done]";
+
+  return o << "[type=" << op.type << ";"
+           << "start=" << op.start_time << ";"
+           << "left=" << op.time_left << "]";
 }
 
 std::ostream& operator <<(std::ostream& o, const IO_Operation* arr) {
   if(!arr)
-    return o << "(empty)";
+    return o;
 
   for(int i = 0; i < MAX_IOS; ++i) {
     if(arr[i].type == -1 || arr[i].start_time == -1)
       break;
 
-    o << arr[i];
+    o << arr[i] << " ";
   }
 
   return o;

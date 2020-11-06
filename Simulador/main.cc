@@ -48,7 +48,7 @@ IO_Operation c[4] = { createIO(IO_DISCO,1), createIO(IO_FITA,2), createIO(IO_IMP
 void initializeProcesses() {
   for(int i = 0; i < MAX_PROCESSES; ++i) {
     int t = i % 4;
-    int random_total_time = (std::rand() % 5)+2;
+    int random_total_time = (std::rand() % 5)+8;
     int random_start_time = (std::rand() % 5)+1;
     switch(t) {
       case 0: {
@@ -93,30 +93,6 @@ void executeProcess() {
   std::cout << "\tProcesso " << proc->PID << " falta "
             << proc->total_time << " u.t." << std::endl;
 
-  IO_Operation* proc_ios = proc->IOs;
-  if(proc_ios) {
-    for(int i = 0; i < MAX_IOS; ++i) {
-      if(proc_ios[i].type == -1 || proc_ios[i].start_time == -1)
-        break;
-
-      if(proc_ios[i].start_time == proc->elapsed_time
-      && proc_ios[i].time_left > 0) {
-        std::cout << "\tProcesso " << proc->PID << " entrou em I/O! "
-                  << "Terminará em " << proc_ios[i].time_left << " u.t."
-                  << std::endl;
-        current_process_index = -1;
-        proc->status = STATUS_WAITING;
-
-        if(proc->priority == PRIORITY_HIGH)
-          shift(high);
-        else
-          shift(low);
-
-        proc->priority = PRIORITY_IO;
-        push(getListForIO(proc_ios[i].type), proc);
-      }
-    }
-  }
 
   if(proc->total_time <= 0) {
     std::cout << "\tProcesso terminado!" << std::endl;
@@ -127,6 +103,31 @@ void executeProcess() {
       shift(high);
     else
       shift(low);
+  } else {
+    IO_Operation* proc_ios = proc->IOs;
+    if(proc_ios) {
+      for(int i = 0; i < MAX_IOS; ++i) {
+        if(proc_ios[i].type == -1 || proc_ios[i].start_time == -1)
+          break;
+
+        if(proc_ios[i].start_time == proc->elapsed_time
+        && proc_ios[i].time_left > 0 && !proc_ios[i].done) {
+          std::cout << "\tProcesso " << proc->PID << " entrou em I/O! "
+                    << "Terminará em " << proc_ios[i].time_left << " u.t."
+                    << std::endl;
+          current_process_index = -1;
+          proc->status = STATUS_WAITING;
+
+          if(proc->priority == PRIORITY_HIGH)
+            shift(high);
+          else
+            shift(low);
+
+          proc->priority = PRIORITY_IO;
+          push(getListForIO(proc_ios[i].type), proc);
+        }
+      }
+    }
   }
 }
 
@@ -186,49 +187,62 @@ void checkForNewProcess(int cycle_count) {
   }
 }
 
+void changeProcessPriorityFromIO(Process* proc, int io_type) {
+  switch(io_type) {
+    case IO_DISCO:
+      proc->priority = PRIORITY_LOW;
+      push(low, proc);
+      break;
+    case IO_FITA:
+    case IO_IMPRESSORA:
+      proc->priority = PRIORITY_HIGH;
+      push(high, proc);
+      break;
+  }
+}
+
 void updateIOList(ListController& lc, int io_type) {
   Process* proc = first(lc);
+  if(!proc)
+    return;
+  std::cout << "\tPrimeiro na fila de IO é " << proc->PID << std::endl;
+
   IO_Operation* proc_ios = proc->IOs;
+  if(!proc_ios) {
+    std::cout << "\tProcesso não tem lista de IOs! Uh oh!" << std::endl;
+    return;
+  }
 
-  if(proc_ios) {
-    for(int i = 0; i < MAX_IOS; ++i) {
-      IO_Operation op = proc_ios[i];
-      if(op.type == -1 || op.start_time == -1)
-        break;
+  for(int i = 0; i < MAX_IOS; ++i) {
+    IO_Operation& op = proc_ios[i];
+    if(op.type == -1 || op.start_time == -1)
+      break;
 
-      if(proc_ios[i].type == io_type && !proc_ios[i].done) {
-        if(proc_ios[i].time_left > 0) {
-          proc_ios[i].time_left--;
-          std::cout << "Processo " << proc->PID << " em IO (" << io_type
-                    << "), falta " << proc_ios[i].time_left << " u.t." << std::endl;
-        } else if(proc_ios[i].time_left <= 0) {
-          proc_ios[i].done = 1;
-          shift(lc);
-          std::cout << "Processo " << proc->PID << " terminou IO (" << io_type
-                  << ")!" << std::endl;
-          proc->status = STATUS_READY;
-          switch(io_type) {
-            case IO_DISCO:
-              proc->priority = PRIORITY_LOW;
-              push(low, proc);
-              break;
-            case IO_FITA:
-            case IO_IMPRESSORA:
-              proc->priority = PRIORITY_HIGH;
-              push(high, proc);
-              break;
-            default:
-              break;
-          }
-        }
+    if(op.type == io_type && !op.done) {
+      if(op.time_left > 0) {
+        op.time_left--;
+        std::cout << "\tProcesso " << proc->PID << " em IO (" << io_type
+                  << "), falta " << op.time_left << " u.t." << std::endl;
+        return;
+      }
+      if(op.time_left <= 0) {
+        op.done = 1;
         break;
       }
     }
   }
+
+  // Se chegou nesse ponto sem achar nada, quer dizer que o processo deveria
+  // sair da lista de I/Os
+  shift(lc);
+  std::cout << "Processo " << proc->PID << " terminou IO (" << io_type
+          << ")!" << std::endl;
+  proc->status = STATUS_READY;
+  changeProcessPriorityFromIO(proc, io_type);
 }
 
 void checkForFinishedIO() {
-  std::cout << "\tConferindo por processos que terminaram IO..." << std::endl;
+  std::cout << "\tConferindo por processos que terminaram IO" << std::endl;
 
   // I/O de disco
   if(io_disk.length > 0)
@@ -242,27 +256,25 @@ void checkForFinishedIO() {
 }
 
 int tryRunNewProcess() {
-  std::cout << "\tNão há processos executando. Procurando um processo com estado "
-            << "'READY' para ser executado." << std::endl;
+  std::cout << "\tNão há processos executando" << std::endl;
   Process* proc;
   if(high.length > 0) {
     proc = first(high);
   } else if(low.length > 0) {
     proc = first(low);
   } else {
-    std::cout << "\tNenhum processo encontrado!" << std::endl;
     return -1;
   }
   for(int i = 0; i < MAX_PROCESSES; ++i) {
     if(proc == all_processes[i]) {
-      std::cout << "\tEncontrado! Executando processo " << proc->PID << std::endl;
+      std::cout << "\tExecutando processo " << proc->PID << std::endl;
       proc->status = STATUS_RUNNING;
       proc->remaining_time = TIME_SLICE;
       return i;
     }
   }
   std::cout << "Existe processo na fila, porém ele não está na lista de todos "
-            << "os processos! Isso não deveria acontecer!" << std::endl;
+            << "os processos?! Isso não deveria acontecer!" << std::endl;
   return -1;
 }
 
@@ -293,13 +305,15 @@ std::string getStatusSymbol(int status) {
 }
 
 std::string p(ListController& lc, Process*** pl) {
-  std::string str = std::to_string(lc.start_index) + " [ ";
+  std::string str = "[ ";
   for(int i = lc.start_index; i < lc.start_index+lc.length; ++i) {
     Process* proc = (*pl)[i % MAX_PROCESSES];
     str += std::to_string(proc->PID) + getStatusSymbol(proc->status);
     str += " ";
   }
-  str += "] " + std::to_string(lc.length) ;
+  str += "]";
+  // std += "    start=" + std::to_string(lc.start_index);
+  // str += "; len=" + std::to_string(lc.length);
   return str;
 }
 std::string p(int len, Process*** pl) {
@@ -316,18 +330,23 @@ std::string p(int len, Process*** pl) {
 
 void printSystemState() {
   std::cout << "\tEstado das filas:" << std::endl;
-  std::cout << "\t\tALL:" << std::endl;
+  std::cout << "\t\tTODOS:" << std::endl;
   std::cout << "\t\t" << p(MAX_PROCESSES, &all_processes) << std::endl;
-  std::cout << "\t\tHIGH:        " << high.length << " processos" << std::endl;
+  std::cout << "\t\tALTA p.:      " << high.length << " processos" << std::endl;
   std::cout << "\t\t" << p(high, &high_processes) << std::endl;
-  std::cout << "\t\tLOW:         " << low.length << " processos" << std::endl;
+  std::cout << "\t\tBAIXA p.:     " << low.length << " processos" << std::endl;
   std::cout << "\t\t" << p(low, &low_processes) << std::endl;
-  std::cout << "\t\tIMPRESSORA:  " << io_printer.length << " processos" << std::endl;
-  std::cout << "\t\t" << p(io_printer, &io_printer_processes) << std::endl;
-  std::cout << "\t\tDISCO:       " << io_disk.length << " processos" << std::endl;
+  std::cout << "\t\tDISCO=0:      " << io_disk.length << " processos" << std::endl;
   std::cout << "\t\t" << p(io_disk, &io_disk_processes) << std::endl;
-  std::cout << "\t\tFITA:        " << io_tape.length << " processos" << std::endl;
+  std::cout << "\t\tFITA=1:       " << io_tape.length << " processos" << std::endl;
   std::cout << "\t\t" << p(io_tape, &io_tape_processes) << std::endl;
+  std::cout << "\t\tIMPRESSORA=2: " << io_printer.length << " processos" << std::endl;
+  std::cout << "\t\t" << p(io_printer, &io_printer_processes) << std::endl;
+
+  std::cout << "\tEstado dos processos:" << std::endl;
+  for(int i = 0; i < MAX_PROCESSES; ++i) {
+    std::cout << "\t\t" << all_processes[i] << std::endl;
+  }
 }
 
 
