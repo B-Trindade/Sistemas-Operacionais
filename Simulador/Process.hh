@@ -16,6 +16,7 @@ public:
   int priority = PRIORITY_HIGH; // Nível de prioridade do processo
   int total_time;               // Tempo total a ser executado
   int start_time;               // Momento em que o processo inicia
+  int elapsed_time = 0;         // Tempo já executado (no total)
   int remaining_time = 0;       // Tempo já executado (nesse timeslice)
   IO_Operation* IOs;            // Array de momentos de I/O
 

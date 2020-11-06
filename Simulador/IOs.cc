@@ -2,17 +2,18 @@
 #include <iostream>
 
 #include "enum.hh"
+#include "declares.hh"
 #include "IOs.hh"
 
 int getIODuration(int io) {
   // TODO: modificar os tempos
   switch(io) {
     case IO_DISCO:
-      return 100;
+      return 2;
     case IO_FITA:
-      return 101;
+      return 5;
     case IO_IMPRESSORA:
-      return 102;
+      return 10;
     default:
       return 0;
   }
@@ -26,7 +27,7 @@ std::ostream& operator <<(std::ostream& o, const IO_Operation* arr) {
   if(!arr)
     return o << "(empty)";
 
-  for(int i = 0; i < 50; ++i) {
+  for(int i = 0; i < MAX_IOS; ++i) {
     if(arr[i].type == -1 || arr[i].start_time == -1)
       break;
 
@@ -41,14 +42,6 @@ IO_Operation createIO(int type, int start_time) {
   ret.type = type;
   ret.start_time = start_time;
   ret.time_left = getIODuration(type);
+  ret.done = 0;
   return ret;
-}
-
-void checkForFinishedIO(int cycle_count) {
-  // TODO: essa função
-  // TODO: essa funcao deve verificar a 
-
-  (void)cycle_count; // (evita warnings de unused)
-  std::cout << "\tConferindo por processos que terminaram IO..." << std::endl;
-  std::cout << "\tNenhum processo terminou IO!" << std::endl;
 }

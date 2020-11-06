@@ -20,7 +20,8 @@ Process* first(ListController& lc) {
 void push(ListController& lc, Process* proc) {
   lc.length++;
   int index = (lc.start_index + lc.length - 1) % MAX_PROCESSES;
-  std::cout << "\tInserindo processo " << proc->PID << " em [" << index << "]" << std::endl;
+  std::cout << "\tInserindo processo " << proc->PID << " em [" << index << "] ("
+            << lc.length << ")" << std::endl;
   (*lc.list)[index] = proc;
 }
 
@@ -28,5 +29,6 @@ Process* shift(ListController& lc) {
   Process* first = (*lc.list)[lc.start_index];
   lc.start_index = (lc.start_index + 1) % MAX_PROCESSES;
   lc.length--;
+  std::cout << "\tRemovendo processo " << first->PID << " (" << lc.length << ")" << std::endl;
   return first;
 }

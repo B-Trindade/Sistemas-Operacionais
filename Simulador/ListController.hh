@@ -8,7 +8,7 @@
 typedef struct ListController {
   int start_index;  // Index do primeiro item da lista
   int length;       // Tamanho de itens da lista
-  Process*** list;   // Ponteiro para a lista
+  Process*** list;  // Ponteiro para a lista
 } ListController;
 
 // TODO Explicar bonitinho depois
