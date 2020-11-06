@@ -1,5 +1,6 @@
 #include <time.h>
 #include <iostream>
+#include <string>
 
 #include "enum.hh"
 #include "declares.hh"
@@ -19,11 +20,20 @@ int getIODuration(int io) {
   }
 }
 
+std::string getIOName(int io_type) {
+  switch(io_type) {
+    case IO_DISCO:      return "DISCO";
+    case IO_FITA:       return "FITA";
+    case IO_IMPRESSORA: return "IMPRESSORA";
+    default:            return "";
+  }
+}
+
 std::ostream& operator <<(std::ostream& o, const IO_Operation& op) {
   if(op.done)
     return o << "[done]";
 
-  return o << "[type=" << op.type << ";"
+  return o << "[" << getIOName(op.type) << ":"
            << "start=" << op.start_time << ";"
            << "left=" << op.time_left << "]";
 }

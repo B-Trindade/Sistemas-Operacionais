@@ -18,5 +18,6 @@ std::ostream& operator <<(std::ostream& o, const Process* p) {
            << "start=" << p->start_time << ";"
            << "total=" << p->total_time << ";"
            << "slice=" << p->remaining_time << ";"
+           << "elapsed=" << p->elapsed_time << ";"
            << "IOs=" << p->IOs;
 }
