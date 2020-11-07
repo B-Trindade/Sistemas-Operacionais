@@ -42,9 +42,9 @@ ListController io_tape = createLC(io_tape_processes);
 // variáveis são descartadas e removidas da memória; assim, o Process fica com
 // lixo no lugar :(
 IO_Operation IO_Limiter = createIO(-1,-1);
-IO_Operation a[3] = { createIO(IO_DISCO,2),createIO(IO_DISCO,3), IO_Limiter };
+IO_Operation a[3] = { createIO(IO_DISCO,2),createIO(IO_FITA,4), IO_Limiter };
 IO_Operation b[3] = { createIO(IO_IMPRESSORA,4), createIO(IO_FITA,7), IO_Limiter };
-IO_Operation c[4] = { createIO(IO_DISCO,1), createIO(IO_FITA,2), createIO(IO_IMPRESSORA,6),IO_Limiter };
+IO_Operation c[4] = { createIO(IO_DISCO,2), createIO(IO_FITA,4), createIO(IO_IMPRESSORA,6),IO_Limiter };
 
 // Inicializa processos
 void initializeProcesses() {
@@ -92,11 +92,8 @@ ListController& getListForIO(int io_type) {
 void executeProcess() {
   // Pega referência ao processo
   Process* proc = all_processes[current_process_index];
-  // Atualiza: o tempo que falta nesse timeslice,
-  proc->remaining_time--;
-  // o tempo que falta de execução no total,
-  proc->total_time--;
-  // e o tempo já executado pelo processo
+
+  // Atualiza o tempo já executado pelo processo
   proc->elapsed_time++;
 
   // Avisa ao usuário
@@ -170,6 +167,14 @@ void executeProcess() {
         push(getListForIO(io_type), proc);
       }
     }
+  }
+
+  // Se o processo não está em IO
+  if(proc->priority != PRIORITY_IO) {
+    // Atualiza: o tempo que falta nesse timeslice
+    proc->remaining_time--;
+    // e o tempo que falta de execução no total
+    proc->total_time--;
   }
 }
 
