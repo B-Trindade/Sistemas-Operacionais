@@ -11,7 +11,7 @@ extern int process_count;
 class Process {
 public:
   int PID;                      // Identificador do processo
-  int PPID = 1;                 // Identificador do processo pai (sempre = 1)
+  int PPID = 0;                 // Identificador do processo pai (sempre = 0)
   int status = STATUS_NEW;      // Status do processo
   int priority = PRIORITY_HIGH; // Nível de prioridade do processo
   int total_time;               // Tempo total a ser executado
