@@ -29,6 +29,8 @@ Process** io_printer_processes;
 Process** io_disk_processes;
 Process** io_tape_processes;
 
+
+// Controladores das filas de prioridades
 ListController high = createLC(high_processes);
 ListController low = createLC(low_processes);
 
@@ -40,16 +42,17 @@ ListController io_tape = createLC(io_tape_processes);
 // variáveis são descartadas e removidas da memória; assim, o Process fica com
 // lixo no lugar :(
 IO_Operation IO_Limiter = createIO(-1,-1);
-IO_Operation a[3] = { createIO(IO_DISCO,2),createIO(IO_DISCO,3), IO_Limiter };
+IO_Operation a[3] = { createIO(IO_DISCO,2),createIO(IO_FITA,4), IO_Limiter };
 IO_Operation b[3] = { createIO(IO_IMPRESSORA,4), createIO(IO_FITA,7), IO_Limiter };
-IO_Operation c[4] = { createIO(IO_DISCO,1), createIO(IO_FITA,2), createIO(IO_IMPRESSORA,6),IO_Limiter };
+IO_Operation c[4] = { createIO(IO_DISCO,2), createIO(IO_FITA,4), createIO(IO_IMPRESSORA,6),IO_Limiter };
 
 // Inicializa processos
 void initializeProcesses() {
   for(int i = 0; i < MAX_PROCESSES; ++i) {
     int t = i % 4;
-    int random_total_time = (std::rand() % 5)+2;
+    int random_total_time = (std::rand() % 5)+8;
     int random_start_time = (std::rand() % 5)+1;
+
     switch(t) {
       case 0: {
         all_processes[i] = new Process(random_total_time, random_start_time, a);
@@ -70,6 +73,7 @@ void initializeProcesses() {
   }
 }
 
+// Função para pegar o controlador da fila dado um tipo de IO
 ListController& getListForIO(int io_type) {
   switch(io_type) {
     case IO_DISCO:
@@ -84,49 +88,93 @@ ListController& getListForIO(int io_type) {
   }
 }
 
+// Função para executar um ciclo do processo
 void executeProcess() {
+  // Pega referência ao processo
   Process* proc = all_processes[current_process_index];
-  proc->remaining_time--;
-  proc->total_time--;
+
+  // Atualiza o tempo já executado pelo processo
   proc->elapsed_time++;
 
-  std::cout << "\tProcesso " << proc->PID << " falta "
+  // Avisa ao usuário
+  std::cout << "\tExecutando processo " << proc->PID << "; falta "
             << proc->total_time << " u.t." << std::endl;
 
+  // Caso o procesos tenha terminado
+  if(proc->total_time <= 0) {
+    // Avisa ao usuário
+    std::cout << "\tProcesso " << proc->PID << " terminado!" << std::endl;
+    // Atualiza o status do processo para "terminado"
+    proc->status = STATUS_TERMINATED;
+    // Apaga index do processo para que outro possa ser executado
+    current_process_index = -1;
+    // Remove processo da lista em que ele está
+    if(proc->priority == PRIORITY_HIGH) {
+      std::cout << "\tRemovendo " << proc->PID
+                << " da fila de alta prioridade" << std::endl;
+      shift(high);
+    } else {
+      std::cout << "\tRemovendo " << proc->PID
+                << " da fila de baixa prioridade" << std::endl;
+      shift(low);
+    }
+    // Vai embora, processo já terminou
+    return;
+  }
+
+  // Caso contrário, se o processo não terminou
+  // Confere se ele possui lista de I/Os
   IO_Operation* proc_ios = proc->IOs;
   if(proc_ios) {
+    // Caso possua, itera sobre a lista de I/Os dele
     for(int i = 0; i < MAX_IOS; ++i) {
-      if(proc_ios[i].type == -1 || proc_ios[i].start_time == -1)
+      int io_type = proc_ios[i].type;
+
+      // Se chegamos ao fim da lista, sai
+      if(io_type == -1 || proc_ios[i].start_time == -1)
         break;
 
+      // Caso exista um I/O com tempo de início igual ao tempo já executado pelo
+      // processo, e que ainda não terminou
       if(proc_ios[i].start_time == proc->elapsed_time
-      && proc_ios[i].time_left > 0) {
+      && proc_ios[i].time_left > 0 && !proc_ios[i].done) {
+        // Entra em I/O
         std::cout << "\tProcesso " << proc->PID << " entrou em I/O! "
-                  << "Terminará em " << proc_ios[i].time_left << " u.t."
+                  << "Precisa de " << proc_ios[i].time_left << " u.t. de I/O"
                   << std::endl;
-        current_process_index = -1;
+        // Atualiza o status do processo para "esperando" (status de I/O)
         proc->status = STATUS_WAITING;
+        // Apaga index do processo para que outro possa ser executado enquanto
+        // esse espera o I/O
+        current_process_index = -1;
 
-        if(proc->priority == PRIORITY_HIGH)
+        // Remove o processo da fila de prioridade em que estava
+        if(proc->priority == PRIORITY_HIGH) {
+          std::cout << "\tRemovendo " << proc->PID
+                    << " da fila de alta prioridade" << std::endl;
           shift(high);
-        else
+        } else {
+          std::cout << "\tRemovendo " << proc->PID
+                    << " da fila de baixa prioridade" << std::endl;
           shift(low);
+        }
 
+        // Atualiza a prioridade do processo para prioridade especial de I/O
         proc->priority = PRIORITY_IO;
-        push(getListForIO(proc_ios[i].type), proc);
+        // Adiciona o processo à lista adequada de I/O
+        std::cout << "\tAdicionando " << proc->PID << " à fila de I/O ("
+                  << getIOName(io_type) << ")" << std::endl;
+        push(getListForIO(io_type), proc);
       }
     }
   }
 
-  if(proc->total_time <= 0) {
-    std::cout << "\tProcesso terminado!" << std::endl;
-    proc->status = STATUS_TERMINATED;
-    current_process_index = -1;
-    // Remove processo da lista em que ele está
-    if(proc->priority == PRIORITY_HIGH)
-      shift(high);
-    else
-      shift(low);
+  // Se o processo não está em IO
+  if(proc->priority != PRIORITY_IO) {
+    // Atualiza: o tempo que falta nesse timeslice
+    proc->remaining_time--;
+    // e o tempo que falta de execução no total
+    proc->total_time--;
   }
 }
 
@@ -141,9 +189,11 @@ int hasUnfinishedProcess() {
 }
 
 void checkForPreemption() {
+  // Caso não haja processo executando, sai
   if(current_process_index < 0)
     return;
 
+  // Pega referência ao processo sendo executado
   Process* proc = all_processes[current_process_index];
 
   // Se o timeslice do processo já terminou, e ele ainda está executando
@@ -153,19 +203,24 @@ void checkForPreemption() {
               << " sofreu preempção!" << std::endl;
     // O coloca de volta em espera, com baixa prioridade
     proc->status = STATUS_READY;
+    // Apaga index do processo para que outro possa ser executado
     current_process_index = -1;
 
+    // Remove o processo da fila de prioridade em que estava
     if(proc->priority == PRIORITY_HIGH) {
-      // Se o processo possuía alta prioridade, remove ele da lista de alta
-      // prioridade
+      std::cout << "\tRemovendo " << proc->PID
+                << " da fila de alta prioridade" << std::endl;
       shift(high);
     } else {
-      // Senão, remove ele da lista de baixa prioridade para que ele seja
-      // reinserido no final dela
+      std::cout << "\tRemovendo " << proc->PID
+                << " da fila de baixa prioridade" << std::endl;
       shift(low);
     }
+
     // Insere o processo na lista de baixa prioridade
     proc->priority = PRIORITY_LOW;
+    std::cout << "\tAdicionando " << proc->PID
+              << " à fila de baixa prioridade" << std::endl;
     push(low, proc);
   }
 }
@@ -181,54 +236,98 @@ void checkForNewProcess(int cycle_count) {
       proc->priority = PRIORITY_HIGH;
       push(high, proc);
 
-      std::cout << "\tProcesso " << proc->PID << " está pronto para ser executado!" << std::endl;
+      std::cout << "\tAdicionando " << proc->PID
+                << " à fila de alta prioridade" << std::endl;
     }
   }
 }
 
+// Função que adiciona o processo à fila de prioridade correta dependendo do I/O
+void changeProcessPriorityFromIO(Process* proc, int io_type) {
+  // Por definição do trabalho, após I/O de disco, o processo retorna à fila de
+  // baixa prioridade; para outros tipos de I/O, retorna à fila de alta
+  // prioridade
+  switch(io_type) {
+    case IO_DISCO:
+      proc->priority = PRIORITY_LOW;
+      push(low, proc);
+      std::cout << "\t| Adicionando " << proc->PID
+                << " à fila de baixa prioridade" << std::endl;
+      break;
+    case IO_FITA:
+    case IO_IMPRESSORA:
+      proc->priority = PRIORITY_HIGH;
+      push(high, proc);
+      std::cout << "\t| Adicionando " << proc->PID
+                << " à fila de alta prioridade" << std::endl;
+      break;
+  }
+}
+
+// Função que atualiza uma lista de I/O, dado seu controlador e tipo de I/O
 void updateIOList(ListController& lc, int io_type) {
+  // Pega referência ao primeiro processo na fila
   Process* proc = first(lc);
+  // Se não existe processo na file, retorna (lista está vazia)
+  if(!proc)
+    return;
+  // Senão, imprime para o usuário o PID do processo
+  std::cout << "\t| Primeiro na fila de I/O " << getIOName(io_type)
+            << " é Processo " << proc->PID << std::endl;
+
+  // Pega lista de I/Os do processo
   IO_Operation* proc_ios = proc->IOs;
+  // Se não há lista de I/Os, algo deu errado!!
+  if(!proc_ios) {
+    std::cout << "\t| Processo não tem lista de IOs! Uh oh!" << std::endl;
+    return;
+  }
 
-  if(proc_ios) {
-    for(int i = 0; i < MAX_IOS; ++i) {
-      IO_Operation op = proc_ios[i];
-      if(op.type == -1 || op.start_time == -1)
-        break;
+  // Itera sobre a lista de I/Os do processo
+  for(int i = 0; i < MAX_IOS; ++i) {
+    IO_Operation& op = proc_ios[i];
+    // Se chegamos ao final da lista, sai
+    if(op.type == -1 || op.start_time == -1)
+      break;
 
-      if(proc_ios[i].type == io_type && !proc_ios[i].done) {
-        if(proc_ios[i].time_left > 0) {
-          proc_ios[i].time_left--;
-          std::cout << "Processo " << proc->PID << " em IO (" << io_type
-                    << "), falta " << proc_ios[i].time_left << " u.t." << std::endl;
-        } else if(proc_ios[i].time_left <= 0) {
-          proc_ios[i].done = 1;
-          shift(lc);
-          std::cout << "Processo " << proc->PID << " terminou IO (" << io_type
-                  << ")!" << std::endl;
-          proc->status = STATUS_READY;
-          switch(io_type) {
-            case IO_DISCO:
-              proc->priority = PRIORITY_LOW;
-              push(low, proc);
-              break;
-            case IO_FITA:
-            case IO_IMPRESSORA:
-              proc->priority = PRIORITY_HIGH;
-              push(high, proc);
-              break;
-            default:
-              break;
-          }
-        }
+    // Caso o i-ésimo I/O seja do tipo especificado, não tenha terminado...
+    if(op.type == io_type && !op.done) {
+      // E ainda precise de mais tempo
+      if(op.time_left > 0) {
+        // Diminui uma unidade de tempo
+        op.time_left--;
+        // Avisa ao usuário, e sai da função
+        std::cout << "\t| Processo " << proc->PID << " em I/O "
+                  << getIOName(io_type) << ", falta " << (op.time_left+1)
+                  << " u.t." << std::endl;
+        return;
+      }
+      // Caso contrário, se ele não precisa de mais tempo
+      if(op.time_left <= 0) {
+        // Marca como terminado e continua abaixo
+        op.done = 1;
         break;
       }
     }
   }
+
+  // Se chegou nesse ponto:
+  // - ou o processo terminou seu I/O
+  // - ou o programa não encontrou I/O nenhum do tipo especificado
+  // Em ambos os casos, o processo deveria sair da lista de I/Os
+  shift(lc);
+  // Avisa ao usuário
+  std::cout << "\t| Processo " << proc->PID << " terminou I/O ("
+            << getIOName(io_type) << ")! Removendo da fila de I/Os"
+            << std::endl;
+  // Modifica o status do processo
+  proc->status = STATUS_READY;
+  // Adiciona o processo à fila de prioridade adequada (depende do tipo de I/O)
+  changeProcessPriorityFromIO(proc, io_type);
 }
 
 void checkForFinishedIO() {
-  std::cout << "\tConferindo por processos que terminaram IO..." << std::endl;
+  std::cout << "\tConferindo por processos que terminaram I/O:" << std::endl;
 
   // I/O de disco
   if(io_disk.length > 0)
@@ -239,37 +338,62 @@ void checkForFinishedIO() {
   // I/O de impressora
   if(io_printer.length > 0)
     updateIOList(io_printer, IO_IMPRESSORA);
+
+  std::cout << "\tConferido!" << std::endl;
 }
 
 int tryRunNewProcess() {
-  std::cout << "\tNão há processos executando. Procurando um processo com estado "
-            << "'READY' para ser executado." << std::endl;
+  std::cout << "\tNão há processos executando" << std::endl;
+
   Process* proc;
+  // Caso a lista de alta prioridade possua algum processo
   if(high.length > 0) {
+    // Pega o primeiro processo da lista
     proc = first(high);
-  } else if(low.length > 0) {
+    std::cout << "\tHá processo na fila de alta prioridade (Processo "
+              << proc->PID << ")" << std::endl;
+  }
+  // Senão, caso a lista de baixa prioridade possua algum processo
+  else if(low.length > 0) {
+    // Pega o primeiro processo da lista
     proc = first(low);
-  } else {
-    std::cout << "\tNenhum processo encontrado!" << std::endl;
+    std::cout << "\tNão há processo na fila de alta prioridade; porém, há "
+              << "processo na fila de baixa prioridade (Processo "
+              << proc->PID << ")" << std::endl;
+  }
+  // Senão, não executa nenhum processo
+  else {
+    std::cout << "\tNão há procesos na fila de alta, nem de baixa prioridade"
+              << std::endl;
     return -1;
   }
+
+  // Procura o processo na lista de todos os processos para retornar seu index
   for(int i = 0; i < MAX_PROCESSES; ++i) {
     if(proc == all_processes[i]) {
-      std::cout << "\tEncontrado! Executando processo " << proc->PID << std::endl;
+      // Avisa ao usuário
+      std::cout << "\tExecutando processo " << proc->PID << std::endl;
+      // Modifica o status do processo, e reseta seu tempo antes de preempção
       proc->status = STATUS_RUNNING;
       proc->remaining_time = TIME_SLICE;
       return i;
     }
   }
+  // Caso o processo não tenha sido encontrado, temos um problema: o processo
+  // está em uma lista de prioridade, mas não está na lista de todos os
+  // processos! Sabe??? Zero sentido. Enfim haha
   std::cout << "Existe processo na fila, porém ele não está na lista de todos "
-            << "os processos! Isso não deveria acontecer!" << std::endl;
+            << "os processos?! Isso não deveria acontecer!" << std::endl;
   return -1;
 }
 
 void initializeList(Process**& list) {
+  // Inicializa lista preenchida com 0s usando calloc
   list = (Process**)calloc(sizeof(Process*),MAX_PROCESSES);
+
+  // Caso tenha havido um erro na criação
   if(list == NULL) {
-    // Erro criando lista de processos
+    // Avisa para o usuário, e sai do programa
     std::cout << "calloc falhou!" << std::endl;
     exit(1);
   }
@@ -292,14 +416,17 @@ std::string getStatusSymbol(int status) {
   }
 }
 
+// Funções para ajudar na impressão das filas
 std::string p(ListController& lc, Process*** pl) {
-  std::string str = std::to_string(lc.start_index) + " [ ";
+  std::string str = "[ ";
   for(int i = lc.start_index; i < lc.start_index+lc.length; ++i) {
     Process* proc = (*pl)[i % MAX_PROCESSES];
     str += std::to_string(proc->PID) + getStatusSymbol(proc->status);
     str += " ";
   }
-  str += "] " + std::to_string(lc.length) ;
+  str += "]";
+  // std += "    start=" + std::to_string(lc.start_index);
+  // str += "; len=" + std::to_string(lc.length);
   return str;
 }
 std::string p(int len, Process*** pl) {
@@ -313,27 +440,30 @@ std::string p(int len, Process*** pl) {
   return str;
 }
 
-
 void printSystemState() {
   std::cout << "\tEstado das filas:" << std::endl;
-  std::cout << "\t\tALL:" << std::endl;
+  std::cout << "\t\tTODOS:" << std::endl;
   std::cout << "\t\t" << p(MAX_PROCESSES, &all_processes) << std::endl;
-  std::cout << "\t\tHIGH:        " << high.length << " processos" << std::endl;
+  std::cout << "\t\tALTA p.:      " << high.length << " processos" << std::endl;
   std::cout << "\t\t" << p(high, &high_processes) << std::endl;
-  std::cout << "\t\tLOW:         " << low.length << " processos" << std::endl;
+  std::cout << "\t\tBAIXA p.:     " << low.length << " processos" << std::endl;
   std::cout << "\t\t" << p(low, &low_processes) << std::endl;
-  std::cout << "\t\tIMPRESSORA:  " << io_printer.length << " processos" << std::endl;
-  std::cout << "\t\t" << p(io_printer, &io_printer_processes) << std::endl;
-  std::cout << "\t\tDISCO:       " << io_disk.length << " processos" << std::endl;
+  std::cout << "\t\tDISCO:        " << io_disk.length << " processos" << std::endl;
   std::cout << "\t\t" << p(io_disk, &io_disk_processes) << std::endl;
-  std::cout << "\t\tFITA:        " << io_tape.length << " processos" << std::endl;
+  std::cout << "\t\tFITA:         " << io_tape.length << " processos" << std::endl;
   std::cout << "\t\t" << p(io_tape, &io_tape_processes) << std::endl;
+  std::cout << "\t\tIMPRESSORA:   " << io_printer.length << " processos" << std::endl;
+  std::cout << "\t\t" << p(io_printer, &io_printer_processes) << std::endl;
+
+  std::cout << "\tEstado dos processos:" << std::endl;
+  for(int i = 0; i < MAX_PROCESSES; ++i) {
+    std::cout << "\t\t" << all_processes[i] << std::endl;
+  }
 }
 
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-
 
 
 int main() {
@@ -367,16 +497,10 @@ int main() {
 
     std::cout << std::endl << "Ciclo: " << global_cycle_count << std::endl;
 
-    // TODO: código mais temporário que qualquer outra coisa
-    // talvez mudar pra uma função separada seja melhor?
+    // Caso algum processo esteja sendo executado
     if(current_process_index >= 0) {
       // Executa um ciclo do processo
       executeProcess();
-    } else {
-      // Confere se ainda existe algum processo inacabado
-      if(!hasUnfinishedProcess())
-        // Se não existe, termina o loop
-        break;
     }
 
     sleep_ms(STD_TIMEOUT);
@@ -399,13 +523,20 @@ int main() {
     sleep_ms(STD_TIMEOUT);
 
     // (TODO: conferir essa ordem de prioridades)
+    // Caso não haja nenhum processo executando, tenta executar um novo processo
     if(current_process_index < 0)
       current_process_index = tryRunNewProcess();
 
 
     sleep_ms(STD_TIMEOUT);
 
+    // Fim do ciclo; imprime o estado atual do sistema
     printSystemState();
+
+    // Confere se ainda existe algum processo inacabado
+    if(current_process_index < 0 && !hasUnfinishedProcess())
+      // Se não existe, termina o loop
+      break;
 
     sleep_ms(STD_TIMEOUT*3);
   }

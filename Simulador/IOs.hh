@@ -1,4 +1,5 @@
 #include <iostream>
+#include <string>
 
 #ifndef IOs_H  //Include guard
 #define IOs_H
@@ -11,6 +12,7 @@ typedef struct IO_Operation {
 } IO_Operation;
 
 int getIODuration(int io);
+std::string getIOName(int io_type);
 
 std::ostream& operator << (std::ostream& o, const IO_Operation& op);
 std::ostream& operator << (std::ostream& o, const IO_Operation* arr);

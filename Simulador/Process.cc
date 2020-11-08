@@ -10,18 +10,14 @@ int process_count = 0;
 
 // Operador << para impressão de ponteiros de Process
 std::ostream& operator <<(std::ostream& o, const Process* p) {
-  return o << "[*Process](PID=" << p->PID << ")"
-           << "(start=" << p->start_time << ")"
-           << "(remaining=" << p->remaining_time << ")"
-           << "(total=" << p->total_time << ")"
-           << "(IOs=" << p->IOs << ")";
-}
+  if(!p->total_time)
+    return o << "[Process " << p->PID << "] done";
 
-// Operador << para impressão de referências de Process
-std::ostream& operator <<(std::ostream& o, const Process& p) {
-  return o << "[Process](PID=" << p.PID << ")"
-           << "(start=" << p.start_time << ")"
-           << "(remaining=" << p.remaining_time << ")"
-           << "(total=" << p.total_time << ")"
-           << "(IOs=" << p.IOs << ")";
+  return o << "[Process " << p->PID << "] "
+           << "priority=" << p->priority << ";"
+           << "start=" << p->start_time << ";"
+           << "total=" << p->total_time << ";"
+           << "slice=" << p->remaining_time << ";"
+           << "elapsed=" << p->elapsed_time << ";"
+           << "IOs=" << p->IOs;
 }
